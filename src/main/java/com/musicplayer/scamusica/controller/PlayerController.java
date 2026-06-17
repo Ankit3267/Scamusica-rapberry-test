@@ -1119,21 +1119,7 @@ public class PlayerController extends Application {
                         Platform.runLater(() -> albumImageView.setImage(null));
                         asyncExecutor.submit(() -> {
                             try {
-                                Image image;
-                                if (firstImgUrl.startsWith("http")) {
-                                    java.net.HttpURLConnection connection = (java.net.HttpURLConnection) new java.net.URL(firstImgUrl).openConnection();
-                                    connection.setRequestProperty("User-Agent", "Mozilla/5.0");
-                                    connection.setRequestProperty("Connection", "close");
-                                    connection.setConnectTimeout(5000);
-                                    connection.setReadTimeout(5000);
-                                    try (java.io.InputStream in = connection.getInputStream()) {
-                                        image = new Image(in, 400, 400, true, true);
-                                    } finally {
-                                        connection.disconnect();
-                                    }
-                                } else {
-                                    image = new Image(firstImgUrl, 400, 400, true, true, true);
-                                }
+                                Image image = com.musicplayer.scamusica.util.ImageCache.getImage(firstImgUrl);
                                 Platform.runLater(() -> albumImageView.setImage(image));
                             } catch (Exception ignored) {
                             }
@@ -1461,21 +1447,7 @@ public class PlayerController extends Application {
                     albumImageView.setImage(null);
                     asyncExecutor.submit(() -> {
                         try {
-                            Image image;
-                            if (albumImgUrl.startsWith("http")) {
-                                java.net.HttpURLConnection connection = (java.net.HttpURLConnection) new java.net.URL(albumImgUrl).openConnection();
-                                connection.setRequestProperty("User-Agent", "Mozilla/5.0");
-                                connection.setRequestProperty("Connection", "close");
-                                connection.setConnectTimeout(5000);
-                                connection.setReadTimeout(5000);
-                                try (java.io.InputStream in = connection.getInputStream()) {
-                                    image = new Image(in, 400, 400, true, true);
-                                } finally {
-                                    connection.disconnect();
-                                }
-                            } else {
-                                image = new Image(albumImgUrl, 400, 400, true, true, true);
-                            }
+                            Image image = com.musicplayer.scamusica.util.ImageCache.getImage(albumImgUrl);
                             Platform.runLater(() -> albumImageView.setImage(image));
                         } catch (Exception ex) {
                             ex.printStackTrace();
