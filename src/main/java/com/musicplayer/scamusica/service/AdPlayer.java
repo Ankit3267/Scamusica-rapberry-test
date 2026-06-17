@@ -168,14 +168,12 @@ public class AdPlayer {
                             @Override
                             public void finished(MediaPlayer mediaPlayer) {
                                 AppLogger.log("[AdPlayer] Ad audio finished");
-                                vlcPlayer.events().removeMediaPlayerEventListener(this);
                                 latch.countDown();
                             }
 
                             @Override
                             public void error(MediaPlayer mediaPlayer) {
                                 AppLogger.log("[AdPlayer] Ad audio error");
-                                vlcPlayer.events().removeMediaPlayerEventListener(this);
                                 latch.countDown();
                             }
                         };
