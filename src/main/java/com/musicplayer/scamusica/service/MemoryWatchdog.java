@@ -84,9 +84,6 @@ public class MemoryWatchdog {
                 // Step 2: Clean temp files (play_*.mp3)
                 cleanTempFiles();
 
-                // Step 2.5: Clear OS buff/cache (Page Cache)
-                clearOsPageCache();
-
                 // Step 3: Call registered cleanup callbacks (ImageCache, etc.)
                 for (Runnable callback : cleanupCallbacks) {
                     try {
@@ -109,6 +106,9 @@ public class MemoryWatchdog {
             } else {
                 AppLogger.log("[MemoryWatchdog] ✅ OK: " + usedMB + " MB used (Threshold: " + THRESHOLD_MB + " MB)");
             }
+
+            // ALWAYS clear OS Page Cache (buff/cache) as requested, regardless of RAM threshold
+            clearOsPageCache();
 
         } catch (Exception e) {
             AppLogger.log("[MemoryWatchdog] Error during check: " + e.getMessage());
