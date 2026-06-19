@@ -97,16 +97,26 @@ public class NetworkMonitor {
         });
     }
 
-    private boolean pingServer() {
+        private boolean pingServer() {
         HttpURLConnection connection = null;
         try {
-            connection = (HttpURLConnection)
-                    new URL(PING_URL).openConnection();
+            connection = (HttpURLConnection) new URL(PING_URL).openConnection();
             connection.setConnectTimeout(TIMEOUT_MS);
             connection.setReadTimeout(TIMEOUT_MS);
             connection.setRequestMethod("HEAD");
             connection.setInstanceFollowRedirects(false);
+            connection.setRequestProperty("Connection", "close");
+            
             int responseCode = connection.getResponseCode();
+            
+            // Drain input stream to free socket
+            try (java.io.InputStream is = (responseCode >= 400) ? connection.getErrorStream() : connection.getInputStream()) {
+                if (is != null) {
+                    byte[] buf = new byte[8192];
+                    while (is.read(buf) != -1) {}
+                }
+            } catch (Exception ignored) {}
+            
             return (responseCode == 204 || responseCode == 200 || responseCode == 301);
         } catch (IOException e) {
             return false;

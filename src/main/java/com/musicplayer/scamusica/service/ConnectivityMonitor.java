@@ -19,7 +19,9 @@ public class ConnectivityMonitor {
 
     public void start() {
         running = true;
-        new Thread(this::loop, "ConnectivityMonitor").start();
+        Thread t = new Thread(this::loop, "ConnectivityMonitor");
+        t.setDaemon(true);
+        t.start();
     }
 
     public void stop() {
@@ -36,7 +38,8 @@ public class ConnectivityMonitor {
             }
 
             try {
-                Thread.sleep(3000);
+                // Change interval to 10 minutes (600,000 ms) as requested
+                Thread.sleep(600000);
             } catch (InterruptedException ignored) {}
         }
     }
@@ -49,9 +52,19 @@ public class ConnectivityMonitor {
             con.setRequestMethod("GET");
             con.setConnectTimeout(2000);
             con.setReadTimeout(2000);
+            con.setRequestProperty("Connection", "close");
             con.connect();
 
             int code = con.getResponseCode();
+            
+            // Drain input stream to free socket
+            try (java.io.InputStream is = (code >= 400) ? con.getErrorStream() : con.getInputStream()) {
+                if (is != null) {
+                    byte[] buf = new byte[8192];
+                    while (is.read(buf) != -1) {}
+                }
+            } catch (Exception ignored) {}
+            
             return (code >= 200 && code < 500)
                     ?Status.ONLINE
                     : Status.OFFLINE;

@@ -102,6 +102,8 @@ public class PlayerController extends Application {
 
     private volatile int currentGenreTotalFiles = 0;
     private final AtomicInteger currentGenreDownloadedCount = new AtomicInteger(0);
+
+    private final PlaylistApiService apiService = new PlaylistApiService();
     private volatile double currentFileProgressFraction = 0.0;
 
     private ScheduledExecutorService schedular;
@@ -555,13 +557,11 @@ public class PlayerController extends Application {
         }
 
         try {
-            PlaylistApiService api = new PlaylistApiService();
-
             String currentPlaylist = currentPlaylistName;
             if (currentPlaylist == null)
                 return;
 
-            List<PlaylistTrack> serverTracks = api.fetchTracksForGenre(currentPlaylist);
+            List<PlaylistTrack> serverTracks = apiService.fetchTracksForGenre(currentPlaylist);
             AppLogger.log("[SYNC] Server tracks count: " + serverTracks.size());
 
             if (serverTracks == null)
@@ -641,8 +641,7 @@ public class PlayerController extends Application {
                 syncAdsFromServer();
                 // ✅ Playlist titles sync
                 try {
-                    PlaylistApiService api2 = new PlaylistApiService();
-                    List<String> serverTitles = api2.fetchPlaylistTitles();
+                    List<String> serverTitles = apiService.fetchPlaylistTitles();
 
                     if (serverTitles != null && !serverTitles.isEmpty()) {
                         Platform.runLater(() -> {
@@ -777,11 +776,13 @@ public class PlayerController extends Application {
                                         .log("[AdPlayer] Resuming from local file: " + encryptedFile.getAbsolutePath());
                                 asyncExecutor.submit(() -> {
                                     try {
-                                        if (currentTempFile != null && currentTempFile.exists()) {
-                                            currentTempFile.delete();
-                                        }
                                         File tempFile = decryptToTemp(encryptedFile);
-                                        currentTempFile = tempFile;
+                                        synchronized (PlayerController.this) {
+                                            if (currentTempFile != null && currentTempFile.exists()) {
+                                                currentTempFile.delete();
+                                            }
+                                            currentTempFile = tempFile;
+                                        }
                                         Platform.runLater(() -> {
                                             int originalVol = (int) prefs.getDouble(PREF_VOLUME, 85.0);
                                             long savedTime = adPlayer.getSavedSongTime();
@@ -1571,11 +1572,13 @@ public class PlayerController extends Application {
                     int originalPriority = Thread.currentThread().getPriority();
                     Thread.currentThread().setPriority(Thread.MAX_PRIORITY);
                     try {
-                        if (currentTempFile != null && currentTempFile.exists()) {
-                            currentTempFile.delete();
-                        }
                         File tempFile = decryptToTemp(encryptedFile);
-                        currentTempFile = tempFile;
+                        synchronized (PlayerController.this) {
+                            if (currentTempFile != null && currentTempFile.exists()) {
+                                currentTempFile.delete();
+                            }
+                            currentTempFile = tempFile;
+                        }
                         String localUrl = tempFile.toURI().toString();
 
                         if (!localUrl.contains(".mp3")) {
@@ -1739,14 +1742,16 @@ public class PlayerController extends Application {
                     return;
                 }
 
-                if (currentTempFile != null) {
-                    try {
-                        if (currentTempFile.exists())
-                            currentTempFile.delete();
-                        AppLogger.log("[TEMP] Deleted on finish: " + currentTempFile.getName());
-                    } catch (Exception ignored) {
+                synchronized (PlayerController.this) {
+                    if (currentTempFile != null) {
+                        try {
+                            if (currentTempFile.exists())
+                                currentTempFile.delete();
+                            AppLogger.log("[TEMP] Deleted on finish: " + currentTempFile.getName());
+                        } catch (Exception ignored) {
+                        }
+                        currentTempFile = null;
                     }
-                    currentTempFile = null;
                 }
 
                 Platform.runLater(() -> {
@@ -1895,13 +1900,15 @@ public class PlayerController extends Application {
         // Intentionally NOT removing VLC listener or setting vlcHandlersAttached to false
         // to prevent JNA native callback memory leaks
 
-        if (currentTempFile != null) {
-            try {
-                if (currentTempFile.exists())
-                    currentTempFile.delete();
-            } catch (Exception ignored) {
+        synchronized (PlayerController.this) {
+            if (currentTempFile != null) {
+                try {
+                    if (currentTempFile.exists())
+                        currentTempFile.delete();
+                } catch (Exception ignored) {
+                }
+                currentTempFile = null;
             }
-            currentTempFile = null;
         }
 
         if (vlcPlayer != null) {

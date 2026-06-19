@@ -60,6 +60,8 @@ public class ApiClient {
             connection.setDoOutput(true);
             connection.setRequestProperty("Content-Type", "application/json");
         }
+        
+        connection.setRequestProperty("Connection", "close");
 
         if (headers != null) {
             for (String key : headers.keySet()) {
@@ -78,29 +80,32 @@ public class ApiClient {
         int status = connection.getResponseCode();
         System.out.println("[ApiClient] HTTP Status = " + status);
 
-        InputStream is = (status < HttpsURLConnection.HTTP_BAD_REQUEST)
+        try (InputStream is = (status < HttpsURLConnection.HTTP_BAD_REQUEST)
                 ? connection.getInputStream()
-                : connection.getErrorStream();
+                : connection.getErrorStream()) {
 
-        if (is == null) {
-            System.out.println("[ApiClient] Response stream is NULL");
+            if (is == null) {
+                System.out.println("[ApiClient] Response stream is NULL");
+                connection.disconnect();
+                return "";
+            }
+
+            StringBuilder response = new StringBuilder();
+            try (BufferedReader br = new BufferedReader(new InputStreamReader(is, StandardCharsets.UTF_8))) {
+                String line;
+                while ((line = br.readLine()) != null) {
+                    response.append(line);
+                }
+            }
+
             connection.disconnect();
-            return "";
+
+            System.out.println("[ApiClient] Raw Response = " + response);
+            return response.toString();
+        } catch (Exception e) {
+            connection.disconnect();
+            throw e;
         }
-
-        BufferedReader br = new BufferedReader(new InputStreamReader(is, StandardCharsets.UTF_8));
-        StringBuilder response = new StringBuilder();
-        String line;
-
-        while ((line = br.readLine()) != null) {
-            response.append(line);
-        }
-
-        br.close();
-        connection.disconnect();
-
-        System.out.println("[ApiClient] Raw Response = " + response);
-        return response.toString();
     }
 
     public static boolean downloadToFile(String urlString,
@@ -120,15 +125,16 @@ public class ApiClient {
         System.out.println("[ApiClient][DOWNLOAD] HTTP Status = " + status);
 
         if (status >= HttpsURLConnection.HTTP_BAD_REQUEST) {
-            InputStream err = connection.getErrorStream();
-            if (err != null) {
-                try (BufferedReader br = new BufferedReader(new InputStreamReader(err))) {
-                    StringBuilder sb = new StringBuilder();
-                    String line;
-                    while ((line = br.readLine()) != null) sb.append(line);
-                    System.out.println("[ApiClient][DOWNLOAD] Error Response = " + sb);
+            try (InputStream err = connection.getErrorStream()) {
+                if (err != null) {
+                    try (BufferedReader br = new BufferedReader(new InputStreamReader(err))) {
+                        StringBuilder sb = new StringBuilder();
+                        String line;
+                        while ((line = br.readLine()) != null) sb.append(line);
+                        System.out.println("[ApiClient][DOWNLOAD] Error Response = " + sb);
+                    }
                 }
-            }
+            } catch (Exception ignored) {}
             connection.disconnect();
             return false;
         }
@@ -177,6 +183,7 @@ public class ApiClient {
             URL url = new URL(urlStr);
             connection = (HttpURLConnection) url.openConnection();
             connection.setRequestMethod("GET");
+            connection.setRequestProperty("Connection", "close");
 
             if (headers != null) {
                 for (Map.Entry<String, String> entry : headers.entrySet()) {

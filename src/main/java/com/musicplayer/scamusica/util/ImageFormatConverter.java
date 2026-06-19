@@ -80,4 +80,24 @@ public class ImageFormatConverter {
             return Integer.toHexString(input.hashCode());
         }
     }
+
+    public static void cleanupOldCache() {
+        try {
+            String tmpDir = System.getProperty("java.io.tmpdir");
+            File cacheDir = new File(tmpDir, CACHE_DIR_NAME);
+            if (!cacheDir.exists()) return;
+
+            File[] files = cacheDir.listFiles();
+            if (files == null) return;
+
+            long cutoff = System.currentTimeMillis() - (24 * 60 * 60 * 1000L); // 24 hours
+            for (File file : files) {
+                if (file.lastModified() < cutoff) {
+                    file.delete();
+                }
+            }
+        } catch (Exception e) {
+            System.out.println("[ImageFormatConverter] Failed to clean up cache: " + e.getMessage());
+        }
+    }
 }

@@ -6,8 +6,20 @@ import java.io.*;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.security.MessageDigest;
+import java.util.LinkedHashMap;
+import java.util.Map;
 
 public class ImageCache {
+
+    private static final int MAX_MEMORY_CACHE_SIZE = 10;
+    
+    // LRU Cache for Image objects
+    private static final Map<String, Image> memoryCache = new LinkedHashMap<String, Image>(MAX_MEMORY_CACHE_SIZE + 1, 0.75f, true) {
+        @Override
+        protected boolean removeEldestEntry(Map.Entry<String, Image> eldest) {
+            return size() > MAX_MEMORY_CACHE_SIZE;
+        }
+    };
 
     private static final String IMAGES_DIR = System.getProperty("user.home")
             + File.separator + ".scamusica"
@@ -43,6 +55,13 @@ public class ImageCache {
             return null;
         }
 
+        synchronized (memoryCache) {
+            Image cachedImage = memoryCache.get(imageUrl);
+            if (cachedImage != null) {
+                return cachedImage;
+            }
+        }
+
         try {
             File imageFile = new File(getImagesDir(), getFilenameFromUrl(imageUrl));
 
@@ -51,7 +70,11 @@ public class ImageCache {
                 AppLogger.log("[ImageCache] Loading image from disk cache: " + imageFile.getAbsolutePath());
                 try (InputStream in = new FileInputStream(imageFile)) {
                     // 400x400 limit saves memory footprint
-                    return new Image(in, 400, 400, true, true);
+                    Image img = new Image(in, 400, 400, true, true);
+                    synchronized (memoryCache) {
+                        memoryCache.put(imageUrl, img);
+                    }
+                    return img;
                 }
             }
 
@@ -77,7 +100,11 @@ public class ImageCache {
 
                 // Read from the newly saved file with reduced size
                 try (InputStream in = new FileInputStream(imageFile)) {
-                    return new Image(in, 400, 400, true, true);
+                    Image img = new Image(in, 400, 400, true, true);
+                    synchronized (memoryCache) {
+                        memoryCache.put(imageUrl, img);
+                    }
+                    return img;
                 }
             } else {
                 return new Image(imageUrl, 400, 400, true, true, true);
@@ -87,6 +114,12 @@ public class ImageCache {
             AppLogger.log("[ImageCache] Error loading image: " + e.getMessage());
             // Fallback to direct loading
             return new Image(imageUrl, 400, 400, true, true, true);
+        }
+    }
+    
+    public static void clearMemoryCache() {
+        synchronized (memoryCache) {
+            memoryCache.clear();
         }
     }
 }

@@ -15,6 +15,7 @@ public class MemoryWatchdog {
 
     private static MemoryWatchdog instance;
     private ScheduledExecutorService scheduler;
+    private ScheduledExecutorService cacheClearScheduler;
     private volatile boolean running = false;
 
     // Threshold in MB based on OS level free -m output
@@ -49,9 +50,18 @@ public class MemoryWatchdog {
             return t;
         });
 
-        // Run every 15 minutes as requested
+        // Run JVM/OS check and temp file cleanup every 15 minutes
         scheduler.scheduleAtFixedRate(this::checkMemoryAndClean, 15, 15, TimeUnit.MINUTES);
         AppLogger.log("[MemoryWatchdog] Started. Monitoring OS memory usage every 15 mins. Threshold: " + THRESHOLD_MB + " MB");
+
+        cacheClearScheduler = Executors.newSingleThreadScheduledExecutor(r -> {
+            Thread t = new Thread(r, "CacheClear-Thread");
+            t.setDaemon(true);
+            return t;
+        });
+        
+        // Clear OS page cache every 1 hour (60 mins)
+        cacheClearScheduler.scheduleAtFixedRate(this::clearOsPageCache, 60, 60, TimeUnit.MINUTES);
     }
 
     public void stop() {
@@ -59,6 +69,10 @@ public class MemoryWatchdog {
         if (scheduler != null) {
             scheduler.shutdownNow();
             scheduler = null;
+        }
+        if (cacheClearScheduler != null) {
+            cacheClearScheduler.shutdownNow();
+            cacheClearScheduler = null;
         }
         AppLogger.log("[MemoryWatchdog] Stopped");
     }
@@ -74,41 +88,38 @@ public class MemoryWatchdog {
                 AppLogger.log("[MemoryWatchdog] OS check failed. Fallback to JVM heap used: " + usedMB + " MB");
             }
 
+            // ALWAYS Step 1: Force GC and finalization of native objects (VLC/JNA)
+            System.gc();
+            System.runFinalization();
+
+            // ALWAYS Step 2: Clean temp files (play_*.mp3)
+            cleanTempFiles();
+
+            // ALWAYS Step 3: Call registered cleanup callbacks (ImageCache, etc.)
+            for (Runnable callback : cleanupCallbacks) {
+                try {
+                    callback.run();
+                } catch (Exception e) {
+                    AppLogger.log("[MemoryWatchdog] Error in callback: " + e.getMessage());
+                }
+            }
+
+            // ALWAYS Step 4: Force GC again after cleanup
+            System.gc();
+            System.runFinalization();
+
             if (usedMB > THRESHOLD_MB) {
                 AppLogger.log("[MemoryWatchdog] ⚠️ THRESHOLD EXCEEDED: " + usedMB + " MB used (OS-level)");
-
-                // Step 1: Force GC and finalization of native objects (VLC/JNA)
-                System.gc();
-                System.runFinalization();
-
-                // Step 2: Clean temp files (play_*.mp3)
-                cleanTempFiles();
-
-                // Step 3: Call registered cleanup callbacks (ImageCache, etc.)
-                for (Runnable callback : cleanupCallbacks) {
-                    try {
-                        callback.run();
-                    } catch (Exception e) {
-                        AppLogger.log("[MemoryWatchdog] Error in callback: " + e.getMessage());
-                    }
-                }
-
-                // Step 4: Force GC again after cleanup
-                System.gc();
-                System.runFinalization();
 
                 // Wait for a second to allow OS to reclaim memory
                 try { Thread.sleep(1000); } catch (Exception ignored) {}
 
-                // Step 5: Log result
+                // Log result after cleanup
                 long afterMB = getOsUsedMemoryMB();
                 AppLogger.log("[MemoryWatchdog] ✅ CLEANUP DONE: " + usedMB + " MB -> " + afterMB + " MB (OS-level)");
             } else {
-                AppLogger.log("[MemoryWatchdog] ✅ OK: " + usedMB + " MB used (Threshold: " + THRESHOLD_MB + " MB)");
+                AppLogger.log("[MemoryWatchdog] ✅ OK: " + usedMB + " MB used (Threshold: " + THRESHOLD_MB + " MB). JVM Cleanup executed.");
             }
-
-            // ALWAYS clear OS Page Cache (buff/cache) as requested, regardless of RAM threshold
-            clearOsPageCache();
 
         } catch (Exception e) {
             AppLogger.log("[MemoryWatchdog] Error during check: " + e.getMessage());
@@ -116,24 +127,34 @@ public class MemoryWatchdog {
     }
 
     private long getOsUsedMemoryMB() {
+        Process p = null;
         try {
             // Using free -m command for linux/raspberry pi
             ProcessBuilder pb = new ProcessBuilder("free", "-m");
-            Process p = pb.start();
-            BufferedReader reader = new BufferedReader(new InputStreamReader(p.getInputStream()));
-            String line;
-            while ((line = reader.readLine()) != null) {
-                if (line.startsWith("Mem:")) {
-                    // Line format: Mem: total used free shared buff/cache available
-                    String[] parts = line.trim().split("\\s+");
-                    if (parts.length >= 3) {
-                        return Long.parseLong(parts[2]);
+            p = pb.start();
+            try (BufferedReader reader = new BufferedReader(new InputStreamReader(p.getInputStream()))) {
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    if (line.startsWith("Mem:")) {
+                        // Line format: Mem: total used free shared buff/cache available
+                        String[] parts = line.trim().split("\\s+");
+                        if (parts.length >= 3) {
+                            return Long.parseLong(parts[2]);
+                        }
                     }
                 }
+            }
+            // Drain error stream just in case
+            try (BufferedReader errReader = new BufferedReader(new InputStreamReader(p.getErrorStream()))) {
+                while (errReader.readLine() != null) {}
             }
             p.waitFor();
         } catch (Exception e) {
             AppLogger.log("[MemoryWatchdog] Failed to get OS memory: " + e.getMessage());
+        } finally {
+            if (p != null) {
+                p.destroy();
+            }
         }
         return -1;
     }
@@ -168,14 +189,32 @@ public class MemoryWatchdog {
     }
 
     private void clearOsPageCache() {
+        Process syncProc = null;
+        Process dropProc = null;
         try {
+            AppLogger.log("[MemoryWatchdog] Running scheduled clear OS page cache...");
             // First run 'sync' to write any pending data to SD Card
-            new ProcessBuilder("sync").start().waitFor();
+            syncProc = new ProcessBuilder("sync").start();
+            // Drain streams
+            try (BufferedReader reader = new BufferedReader(new InputStreamReader(syncProc.getInputStream()));
+                 BufferedReader errReader = new BufferedReader(new InputStreamReader(syncProc.getErrorStream()))) {
+                while (reader.readLine() != null) {}
+                while (errReader.readLine() != null) {}
+            }
+            syncProc.waitFor();
             
             // Then drop caches (requires sudo without password on Raspberry Pi)
             ProcessBuilder pb = new ProcessBuilder("sudo", "sh", "-c", "echo 3 > /proc/sys/vm/drop_caches");
-            Process p = pb.start();
-            int exitCode = p.waitFor();
+            dropProc = pb.start();
+            
+            // Drain streams
+            try (BufferedReader reader = new BufferedReader(new InputStreamReader(dropProc.getInputStream()));
+                 BufferedReader errReader = new BufferedReader(new InputStreamReader(dropProc.getErrorStream()))) {
+                while (reader.readLine() != null) {}
+                while (errReader.readLine() != null) {}
+            }
+            
+            int exitCode = dropProc.waitFor();
             
             if (exitCode == 0) {
                 AppLogger.log("[MemoryWatchdog] ✅ OS buff/cache cleared successfully via sysctl.");
@@ -184,6 +223,9 @@ public class MemoryWatchdog {
             }
         } catch (Exception e) {
             AppLogger.log("[MemoryWatchdog] Failed to clear OS buff/cache: " + e.getMessage());
+        } finally {
+            if (syncProc != null) syncProc.destroy();
+            if (dropProc != null) dropProc.destroy();
         }
     }
 }
