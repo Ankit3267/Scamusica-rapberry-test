@@ -225,31 +225,36 @@ public class MemoryWatchdog {
 
         try {
             String[] possiblePaths = {
-                    System.getProperty("user.home") + File.separator + "scamusica" + File.separator
-                            + "restart_scamusica.sh",
-                    System.getProperty("user.dir") + File.separator + "scripts" + File.separator
-                            + "restart_scamusica.sh",
-                    System.getProperty("user.dir") + File.separator + "restart_scamusica.sh",
+                    "/opt/scamusica/lib/app/restart_scamusica.sh",     // ← #1 (jpackage default)
                     "/opt/scamusica/bin/restart_scamusica.sh",
-                    "/opt/scamusica/lib/app/restart_scamusica.sh"
+                    "/opt/scamusica/lib/app/scamusica_wrapper.sh",     // wrapper bhi try karo
+                    System.getProperty("user.home") + "/.scamusica/restart_scamusica.sh"
             };
 
+            AppLogger.log("[MemoryWatchdog] 🔍 Searching restart script...");
             File scriptFile = null;
             for (String path : possiblePaths) {
                 File f = new File(path);
-                if (f.exists() && f.canExecute()) {
+                boolean exists = f.exists();
+                boolean exec = exists && f.canExecute();
+                AppLogger.log("   → " + path + " | exists=" + exists + " | executable=" + exec);
+                if (exists && exec) {
                     scriptFile = f;
                     break;
                 }
             }
 
             if (scriptFile != null) {
-                AppLogger.log("[MemoryWatchdog] Launching restart script: " + scriptFile.getAbsolutePath());
-                new ProcessBuilder(scriptFile.getAbsolutePath()).start();
+                AppLogger.log("[MemoryWatchdog] ✅ Launching restart script (detached): " + scriptFile.getAbsolutePath());
+                // ✅ KEY FIX: Launch fully detached with nohup + & + IO redirect
+                ProcessBuilder pb = new ProcessBuilder("bash", "-c",
+                        "nohup " + scriptFile.getAbsolutePath() + " > /dev/null 2>&1 &");
+                pb.redirectInput(ProcessBuilder.Redirect.from(new File("/dev/null")));
+                pb.redirectOutput(ProcessBuilder.Redirect.appendTo(new File("/dev/null")));
+                pb.redirectErrorStream(true);
+                pb.start();
             } else {
-                AppLogger.log("[MemoryWatchdog] ⚠️ Restart script not found or not executable. "
-                        + "Checked: " + String.join(", ", possiblePaths)
-                        + ". Relying on systemd Restart=always if configured.");
+                AppLogger.log("[MemoryWatchdog] ⚠️ Restart script not found or not executable. Relying on systemd Restart=always if configured.");
             }
         } catch (Exception e) {
             AppLogger.log("[MemoryWatchdog] Failed to launch restart script: " + e.getMessage());

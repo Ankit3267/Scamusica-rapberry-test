@@ -130,33 +130,37 @@ public class Main extends Application {
         // ✅ Strategy 1: Find and launch restart script (FULLY DETACHED)
         try {
             String[] possibleScriptPaths = {
-                    System.getProperty("user.home") + File.separator + "scamusica" + File.separator
-                            + "restart_scamusica.sh",
-                    System.getProperty("user.dir") + File.separator + "scripts" + File.separator
-                            + "restart_scamusica.sh",
-                    System.getProperty("user.dir") + File.separator + "restart_scamusica.sh",
+                    "/opt/scamusica/lib/app/restart_scamusica.sh",     // ← #1 (jpackage default)
                     "/opt/scamusica/bin/restart_scamusica.sh",
-                    "/opt/scamusica/lib/app/restart_scamusica.sh"
+                    "/opt/scamusica/lib/app/scamusica_wrapper.sh",     // wrapper bhi try karo
+                    System.getProperty("user.home") + "/.scamusica/restart_scamusica.sh"
             };
 
+            AppLogger.log("[" + source + "] 🔍 Searching restart script...");
+            File scriptFile = null;
             for (String path : possibleScriptPaths) {
                 File f = new File(path);
-                if (f.exists() && f.canExecute()) {
-                    AppLogger.log("[" + source + "] ✅ Launching restart script (detached): " + f.getAbsolutePath());
-                    // ✅ KEY FIX: Launch fully detached with nohup + & + IO redirect
-                    // Without this, script dies from SIGPIPE when parent JVM exits
-                    ProcessBuilder pb = new ProcessBuilder("bash", "-c",
-                            "nohup " + f.getAbsolutePath() + " > /dev/null 2>&1 &");
-                    pb.redirectInput(ProcessBuilder.Redirect.from(new File("/dev/null")));
-                    pb.redirectOutput(ProcessBuilder.Redirect.appendTo(new File("/dev/null")));
-                    pb.redirectErrorStream(true);
-                    pb.start();
-                    relaunchScheduled = true;
+                boolean exists = f.exists();
+                boolean exec = exists && f.canExecute();
+                AppLogger.log("   → " + path + " | exists=" + exists + " | executable=" + exec);
+                if (exists && exec) {
+                    scriptFile = f;
                     break;
                 }
             }
 
-            if (!relaunchScheduled) {
+            if (scriptFile != null) {
+                AppLogger.log("[" + source + "] ✅ Launching restart script (detached): " + scriptFile.getAbsolutePath());
+                // ✅ KEY FIX: Launch fully detached with nohup + & + IO redirect
+                // Without this, script dies from SIGPIPE when parent JVM exits
+                ProcessBuilder pb = new ProcessBuilder("bash", "-c",
+                        "nohup " + scriptFile.getAbsolutePath() + " > /dev/null 2>&1 &");
+                pb.redirectInput(ProcessBuilder.Redirect.from(new File("/dev/null")));
+                pb.redirectOutput(ProcessBuilder.Redirect.appendTo(new File("/dev/null")));
+                pb.redirectErrorStream(true);
+                pb.start();
+                relaunchScheduled = true;
+            } else {
                 AppLogger.log("[" + source + "] ⚠️ Restart script not found. Trying direct relaunch...");
             }
         } catch (Exception e) {
@@ -168,25 +172,35 @@ public class Main extends Application {
             try {
                 String[] possibleAppPaths = {
                         "/opt/scamusica/bin/Scamusica",
-                        "/opt/scamusica/lib/app/scamusica_wrapper.sh"
+                        "/opt/scamusica/lib/app/scamusica_wrapper.sh",
+                        "/opt/scamusica/lib/app/restart_scamusica.sh",
+                        "/opt/scamusica/bin/restart_scamusica.sh",
+                        System.getProperty("user.home") + "/.scamusica/restart_scamusica.sh"
                 };
 
+                AppLogger.log("[" + source + "] 🔍 Searching direct relaunch target...");
+                File appFile = null;
                 for (String path : possibleAppPaths) {
                     File f = new File(path);
-                    if (f.exists() && f.canExecute()) {
-                        AppLogger.log("[" + source + "] ✅ Direct relaunch (detached) via: " + f.getAbsolutePath());
-                        ProcessBuilder pb = new ProcessBuilder("bash", "-c",
-                                "sleep 5 && nohup env DISPLAY=:0 " + f.getAbsolutePath() + " > /dev/null 2>&1 &");
-                        pb.redirectInput(ProcessBuilder.Redirect.from(new File("/dev/null")));
-                        pb.redirectOutput(ProcessBuilder.Redirect.appendTo(new File("/dev/null")));
-                        pb.redirectErrorStream(true);
-                        pb.start();
-                        relaunchScheduled = true;
+                    boolean exists = f.exists();
+                    boolean exec = exists && f.canExecute();
+                    AppLogger.log("   → " + path + " | exists=" + exists + " | executable=" + exec);
+                    if (exists && exec) {
+                        appFile = f;
                         break;
                     }
                 }
 
-                if (!relaunchScheduled) {
+                if (appFile != null) {
+                    AppLogger.log("[" + source + "] ✅ Direct relaunch (detached) via: " + appFile.getAbsolutePath());
+                    ProcessBuilder pb = new ProcessBuilder("bash", "-c",
+                            "sleep 5 && nohup env DISPLAY=:0 " + appFile.getAbsolutePath() + " > /dev/null 2>&1 &");
+                    pb.redirectInput(ProcessBuilder.Redirect.from(new File("/dev/null")));
+                    pb.redirectOutput(ProcessBuilder.Redirect.appendTo(new File("/dev/null")));
+                    pb.redirectErrorStream(true);
+                    pb.start();
+                    relaunchScheduled = true;
+                } else {
                     AppLogger.log("[" + source + "] ⚠️ App binary not found. Relying on systemd Restart=always.");
                 }
             } catch (Exception e) {

@@ -23,9 +23,11 @@ com/musicplayer/scamusica/service/PlaylistApiService.class
 com/musicplayer/scamusica/util/OfflineCache.class
 com/musicplayer/scamusica/util/ApiClient.class
 com/musicplayer/scamusica/model/AdAudio.class
+com/musicplayer/scamusica/Main$1.class
 com/musicplayer/scamusica/controller/PlayerController.class
 com/musicplayer/scamusica/service/AdDownloadManager.class
 com/musicplayer/scamusica/util/EncryptionUtil.class
+com/musicplayer/scamusica/util/ImageCache$1.class
 com/musicplayer/scamusica/util/DeviceUtil.class
 com/musicplayer/scamusica/ui/PlayerControls.class
 com/musicplayer/scamusica/service/AdPlayer$AdPlaybackListener.class
@@ -34,10 +36,12 @@ com/musicplayer/scamusica/util/Utility.class
 com/musicplayer/scamusica/storage/SongMetadataStore.class
 com/musicplayer/scamusica/controller/PlayerController$1.class
 module-info.class
+com/musicplayer/scamusica/util/ImageCache.class
 com/musicplayer/scamusica/ui/PlayerSidebar$1.class
 com/musicplayer/scamusica/service/DownloadManager$DownloadListener.class
 com/musicplayer/scamusica/service/AdScheduler.class
 com/musicplayer/scamusica/service/DownloadManager.class
+com/musicplayer/scamusica/service/MemoryWatchdog.class
 com/musicplayer/scamusica/Main.class
 com/musicplayer/scamusica/controller/PlayerController$4.class
 com/musicplayer/scamusica/manager/LanguageManager.class

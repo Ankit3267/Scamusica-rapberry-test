@@ -192,25 +192,22 @@ jobs:
             --java-options "-Xmx512m -Xms256m -XX:+UseG1GC -XX:MaxHeapFreeRatio=30 -XX:MinHeapFreeRatio=10 -Djna.library.path=\$APPDIR/lib/vlc -DVLC_PLUGIN_PATH=\$APPDIR/lib/vlc/plugins" \
             --verbose
 
-      # ✅ NEW: Fix permissions - wrapper + restart scripts executable banao
-      - name: Fix script permissions in DEB
+      # ✅ NEW: Fix scripts in DEB (Critical)
+      - name: Fix scripts in DEB (Critical)
         run: |
           DEB_FILE=$(ls target/*.deb | head -1)
-          echo "📦 Fixing permissions in: $DEB_FILE"
-          
           mkdir -p target/deb-extract
           dpkg-deb -R "$DEB_FILE" target/deb-extract
           
-          # Dono scripts executable banao
-          chmod +x target/deb-extract/opt/scamusica/lib/app/restart_scamusica.sh || true
-          chmod +x target/deb-extract/opt/scamusica/lib/app/scamusica_wrapper.sh || true
+          mkdir -p target/deb-extract/opt/scamusica/lib/app
           
-          echo "✅ Permissions set:"
-          ls -la target/deb-extract/opt/scamusica/lib/app/
+          cp scripts/restart_scamusica.sh target/deb-extract/opt/scamusica/lib/app/
+          cp scripts/scamusica_wrapper.sh target/deb-extract/opt/scamusica/lib/app/
           
-          # DEB rebuild karo
+          chmod +x target/deb-extract/opt/scamusica/lib/app/*.sh
+          
+          # Rebuild DEB
           dpkg-deb -b target/deb-extract "$DEB_FILE"
-          echo "✅ DEB rebuilt with correct permissions"
 
       - name: Verify package architecture
         run: |

@@ -1,40 +1,28 @@
 #!/bin/bash
-
-LOG_FILE="$HOME/.scamusica/logs/restart.log"
+LOG_FILE="/var/log/scamusica/restart.log"
 mkdir -p "$(dirname "$LOG_FILE")"
 
-echo "[$(date)] 🔄 Restart script initiated..." >> "$LOG_FILE"
+echo "[$(date '+%Y-%m-%d %H:%M:%S')] 🔄 Restart initiated (PID $$)" >> "$LOG_FILE"
 
-# 1. JVM band hone do
+# Aggressive kill
+echo "[$(date '+%Y-%m-%d %H:%M:%S')] Killing old instances..." >> "$LOG_FILE"
+pkill -9 -f 'com.musicplayer.scamusica.Main' 2>/dev/null || true
+pkill -9 -f 'Scamusica' 2>/dev/null || true
+pkill -9 -f 'scamusica.jar' 2>/dev/null || true
 sleep 3
 
-# 2. Baaki processes kill karo
-echo "[$(date)] Killing straggler processes..." >> "$LOG_FILE"
-pkill -f 'Scamusica'
-pkill -f 'scamusica.jar'
-pkill -f 'scamusica_wrapper'
-sleep 2
-
-# 3. OS cache clear karo agar sudo available ho
-if sudo -n true 2>/dev/null; then
-    echo "[$(date)] Dropping OS caches..." >> "$LOG_FILE"
-    sync
-    sudo sh -c 'echo 3 > /proc/sys/vm/drop_caches'
-fi
-
-# 4. DISPLAY set karo
 export DISPLAY=:0
+export XAUTHORITY=/home/pi/.Xauthority
 
-# 5. Wrapper se relaunch karo
-echo "[$(date)] Relaunching via wrapper..." >> "$LOG_FILE"
+echo "[$(date '+%Y-%m-%d %H:%M:%S')] Launching wrapper..." >> "$LOG_FILE"
 
 if [ -x "/opt/scamusica/lib/app/scamusica_wrapper.sh" ]; then
     nohup /opt/scamusica/lib/app/scamusica_wrapper.sh > /dev/null 2>&1 &
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] ✅ Launched via wrapper" >> "$LOG_FILE"
 elif [ -x "/opt/scamusica/bin/Scamusica" ]; then
     nohup /opt/scamusica/bin/Scamusica > /dev/null 2>&1 &
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] ✅ Launched binary" >> "$LOG_FILE"
 else
-    echo "[$(date)] ❌ ERROR: No executable found!" >> "$LOG_FILE"
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] ❌ No launcher found!" >> "$LOG_FILE"
     exit 1
 fi
-
-echo "[$(date)] ✅ Restart completed." >> "$LOG_FILE"
