@@ -43,15 +43,16 @@ public class Main extends Application {
     }
 
     /**
-     * ✅ Checks if a message string from stderr is a fatal JNA error.
-     * We MUST NOT just check for "JNA" or "vlcj" here, because normal INFO/WARNING logs 
-     * print to stderr and contain these words. We only want the specific fatal errors.
+     * ✅ Checks if a stderr line is a FATAL JNA error that requires restart.
+     * IMPORTANT: We check for "JNA:" prefix to avoid false positives from
+     * normal e.printStackTrace() calls throughout the codebase which also
+     * write to stderr. Only exact JNA runtime errors should trigger restart.
      */
     private static boolean isFatalJnaStderrError(String line) {
-        if (line == null) return false;
-        return line.contains("failed to create structure")
-            || line.contains("error handling callback")
-            || line.contains("Exception in thread \"media-events\" JNA");
+        if (line == null || line.isEmpty()) return false;
+        // Only match lines that contain the exact JNA error prefix
+        return line.contains("JNA: error handling callback")
+            || line.contains("JNA: failed to create structure");
     }
 
     /**
@@ -165,17 +166,22 @@ public class Main extends Application {
      * directly to stderr (not thrown as exceptions). This is how JNA reports
      * "error handling callback" and "failed to create structure" errors.
      *
-     * Also used for TESTING — you can simulate by printing to System.err.
+     * IMPORTANT: Uses ThreadLocal buffer because multiple threads (JavaFX,
+     * VLC media-events, MemoryWatchdog, etc.) all write to stderr concurrently.
+     * A shared StringBuilder would get corrupted and cause false matches.
      */
     private static void installStderrInterceptor() {
         final PrintStream originalStderr = System.err;
 
         PrintStream interceptor = new PrintStream(new OutputStream() {
-            private final StringBuilder buffer = new StringBuilder();
+            // ✅ Thread-safe: each thread gets its own buffer
+            private final ThreadLocal<StringBuilder> threadBuffer =
+                ThreadLocal.withInitial(StringBuilder::new);
 
             @Override
             public void write(int b) {
                 char c = (char) b;
+                StringBuilder buffer = threadBuffer.get();
                 buffer.append(c);
 
                 // Process line by line
@@ -186,13 +192,11 @@ public class Main extends Application {
                     // Always write to original stderr so it still shows in terminal
                     originalStderr.println(line);
 
-                    // Always log to AppLogger
-                    if (!line.isEmpty()) {
-                        AppLogger.log("[STDERR] " + line);
-                    }
-
-                    // ✅ Check if this is a JNA error → trigger restart
+                    // ✅ Only check for fatal JNA errors → trigger restart
+                    // Do NOT log every stderr line to AppLogger here, because
+                    // AppLogger itself could cause stderr output (infinite loop risk)
                     if (isFatalJnaStderrError(line) && !restartInitiated) {
+                        AppLogger.log("[StderrInterceptor] ⚠️ Fatal JNA error detected: " + line);
                         handleJnaErrorAndRestart("StderrInterceptor", new RuntimeException("Intercepted JNA Error: " + line));
                     }
                 }
@@ -200,7 +204,7 @@ public class Main extends Application {
         }, true);
 
         System.setErr(interceptor);
-        AppLogger.log("[Main] ✅ stderr interceptor installed. JNA errors will now trigger restart.");
+        AppLogger.log("[Main] ✅ stderr interceptor installed. Fatal JNA errors will trigger restart.");
     }
 
     @Override
