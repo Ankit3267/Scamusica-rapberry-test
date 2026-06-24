@@ -43,26 +43,27 @@ public class Main extends Application {
     }
 
     /**
-     * ✅ Checks if a message string is JNA/VLC related.
+     * ✅ Checks if a message string from stderr is a fatal JNA error.
+     * We MUST NOT just check for "JNA" or "vlcj" here, because normal INFO/WARNING logs 
+     * print to stderr and contain these words. We only want the specific fatal errors.
      */
-    private static boolean isJnaRelatedMessage(String msg) {
-        if (msg == null)
-            return false;
-        return msg.contains("JNA")
-                || msg.contains("com.sun.jna")
-                || msg.contains("failed to create structure")
-                || msg.contains("error handling callback")
-                || msg.contains("uk.co.caprica.vlcj")
-                || msg.contains("Native");
+    private static boolean isFatalJnaStderrError(String line) {
+        if (line == null) return false;
+        return line.contains("failed to create structure")
+            || line.contains("error handling callback")
+            || line.contains("Exception in thread \"media-events\" JNA");
     }
 
     /**
-     * ✅ Checks if a Throwable (or any of its causes/stack) is JNA-related.
+     * ✅ Checks if an actual Throwable is JNA/VLC related.
      */
-    private static boolean isJnaRelated(Throwable throwable) {
+    private static boolean isJnaRelatedException(Throwable throwable) {
         Throwable cause = throwable;
         while (cause != null) {
-            if (isJnaRelatedMessage(cause.getMessage()) || isJnaRelatedMessage(cause.toString())) {
+            String msg = cause.getMessage();
+            String str = cause.toString();
+            if ((msg != null && (msg.contains("JNA") || msg.contains("com.sun.jna")))
+                    || (str != null && (str.contains("JNA") || str.contains("com.sun.jna")))) {
                 return true;
             }
             for (StackTraceElement ste : cause.getStackTrace()) {
@@ -191,7 +192,7 @@ public class Main extends Application {
                     }
 
                     // ✅ Check if this is a JNA error → trigger restart
-                    if (isJnaRelatedMessage(line) && !restartInitiated) {
+                    if (isFatalJnaStderrError(line) && !restartInitiated) {
                         handleJnaErrorAndRestart("StderrInterceptor", new RuntimeException("Intercepted JNA Error: " + line));
                     }
                 }
@@ -209,11 +210,13 @@ public class Main extends Application {
         // ✅ TESTING ONLY — 30 seconds baad JNA error simulate hoga
         // GitHub Actions se build karo, Pi pe deploy karo, 30 sec wait karo
         // Restart hone ke baad yeh line hata do
+        /*
         new Thread(() -> {
             try { Thread.sleep(30000); } catch (Exception e) {}
             System.err.println("Exception in thread \"media-events\" JNA: error handling callback exception");
             System.err.println("JNA: failed to create structure");
         }, "media-events").start();
+        */
 
         // ✅ Catch exceptions thrown on the JavaFX Application Thread (FX thread errors
         // are NOT caught by Thread.setDefaultUncaughtExceptionHandler)
@@ -221,7 +224,7 @@ public class Main extends Application {
             AppLogger.log("[Main-FXThread] Uncaught exception on JavaFX thread: " + throwable.toString());
             AppLogger.log("[Main-FXThread] Stack Trace:\n" + getFullStackTrace(throwable));
 
-            if (isJnaRelated(throwable)) {
+            if (isJnaRelatedException(throwable)) {
                 handleJnaErrorAndRestart("Main-FXThread", throwable);
             }
         });
@@ -259,7 +262,7 @@ public class Main extends Application {
                         + "\n" + getFullStackTrace(suppressed));
             }
 
-            if (isJnaRelated(throwable)) {
+            if (isJnaRelatedException(throwable)) {
                 handleJnaErrorAndRestart("Main-UncaughtHandler", throwable);
             }
         });
