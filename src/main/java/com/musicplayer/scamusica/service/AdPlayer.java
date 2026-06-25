@@ -154,12 +154,18 @@ public class AdPlayer {
                     AppLogger.log("[AdPlayer] Saving song position: " + savedSongTime);
                     audioPlayer.pause();
                     listener.onSongPaused("Ad starting");
-                    audioPlayer.setVolume(originalVol);
                 } catch (Exception ignored) {
                 }
             });
             Thread.sleep(600);
             songPausedForAds = true;
+            
+            // Restore volume for the ad AFTER the song is completely paused
+            Platform.runLater(() -> {
+                try {
+                    audioPlayer.setVolume(originalVol);
+                } catch (Exception ignored) {}
+            });
         }
 
         // Step 3: Loop over ad audios

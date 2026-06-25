@@ -134,6 +134,10 @@ public class CvlcAudioPlayer {
 
                 poller.scheduleAtFixedRate(() -> {
                     if (!isRunning.get()) return;
+                    
+                    // Always query status to detect play/pause state
+                    sendCommand("status");
+                    
                     if (!"playing".equals(currentState) && !"paused".equals(currentState)) {
                         pendingCommand = null;
                         return;
