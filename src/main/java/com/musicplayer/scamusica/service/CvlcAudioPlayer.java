@@ -34,7 +34,7 @@ public class CvlcAudioPlayer {
     private final AtomicBoolean isRunning = new AtomicBoolean(false);
     private volatile int currentVolume = 256; // 256 is 100% in VLC RC
     private volatile String currentState = "stopped";
-    private final Queue<String> expectedResponses = new ConcurrentLinkedQueue<>();
+    private volatile String pendingCommand = null;
     private volatile boolean isUserPaused = false;
 
     public CvlcAudioPlayer() {
@@ -81,7 +81,7 @@ public class CvlcAudioPlayer {
         currentTimeMs = 0;
         currentState = "stopped";
         isUserPaused = false;
-        expectedResponses.clear();
+        pendingCommand = null;
 
         commandExecutor.submit(() -> {
             try {
@@ -134,11 +134,17 @@ public class CvlcAudioPlayer {
 
                 poller.scheduleAtFixedRate(() -> {
                     if (!isRunning.get()) return;
+                    if (!"playing".equals(currentState) && !"paused".equals(currentState)) {
+                        pendingCommand = null;
+                        return;
+                    }
+                    
+                    // We only query length until we have it
                     if (currentDurationMs <= 0) {
                         sendCommand("get_length");
+                    } else {
+                        sendCommand("get_time");
                     }
-                    sendCommand("get_time");
-                    sendCommand("status");
                 }, 500, 500, TimeUnit.MILLISECONDS);
 
             } catch (Exception e) {
@@ -176,7 +182,9 @@ public class CvlcAudioPlayer {
                 if (numStr.startsWith(">")) numStr = numStr.substring(1).trim();
                 long val = Long.parseLong(numStr);
 
-                String expected = expectedResponses.poll();
+                String expected = pendingCommand;
+                pendingCommand = null; // Clear immediately after parsing a number
+
                 if ("get_length".equals(expected)) {
                     if (val > 0) {
                         currentDurationMs = val * 1000;
@@ -198,7 +206,12 @@ public class CvlcAudioPlayer {
             if (writer == null || !isRunning.get()) return;
             try {
                 if (cmd.equals("get_time") || cmd.equals("get_length")) {
-                    expectedResponses.add(cmd);
+                    int waits = 0;
+                    while (pendingCommand != null && waits < 10) {
+                        try { Thread.sleep(10); } catch (Exception ignored) {}
+                        waits++;
+                    }
+                    pendingCommand = cmd;
                 }
                 writer.write(cmd + "\n");
                 writer.flush();
