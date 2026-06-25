@@ -134,41 +134,7 @@ jobs:
           echo "📦 jpackage-input contents:"
           ls -lh target/jpackage-input/
 
-      - name: Copy VLC libs
-        run: |
-          mkdir -p target/jpackage-input/lib/vlc
-          
-          echo "🔍 Detecting VLC paths..."
-          
-          VLC_LIB=$(ldconfig -p | grep libvlc.so | head -1 | awk '{print $NF}')
-          VLC_CORE=$(ldconfig -p | grep libvlccore.so | head -1 | awk '{print $NF}')
-          
-          if [ -z "$VLC_LIB" ] || [ -z "$VLC_CORE" ]; then
-            echo "❌ VLC libs not found!"
-            exit 1
-          fi
-          
-          echo "✅ libvlc: $VLC_LIB"
-          echo "✅ libvlccore: $VLC_CORE"
-          
-          cp "$VLC_LIB" target/jpackage-input/lib/vlc/
-          cp "$VLC_CORE" target/jpackage-input/lib/vlc/
-          
-          VLC_PLUGIN_DIR=$(dirname $VLC_LIB)/vlc/plugins
-          
-          if [ ! -d "$VLC_PLUGIN_DIR" ]; then
-            echo "❌ VLC plugins not found!"
-            exit 1
-          fi
-          
-          echo "✅ plugins: $VLC_PLUGIN_DIR"
-          cp -r $VLC_PLUGIN_DIR target/jpackage-input/lib/vlc/
 
-      - name: Verify VLC bundle
-        run: |
-          echo "🔎 Checking VLC files..."
-          ls -lh target/jpackage-input/lib/vlc
-          ls -lh target/jpackage-input/lib/vlc/plugins | head
 
       - name: Package into DEB
         working-directory: ${{ env.PROJECT_PATH }}
@@ -188,8 +154,8 @@ jobs:
             --runtime-image target/scamusica-runtime \
             --linux-shortcut \
             --linux-menu-group Audio \
-            --linux-package-deps "libgtk-3-0,libglib2.0-0,libasound2,libpng16-16,libjpeg62-turbo,libpcre2-8-0,libx11-6,libxext6,libxrender1,libxtst6,libxi6" \
-            --java-options "-Xmx512m -Xms256m -XX:+UseG1GC -XX:MaxHeapFreeRatio=30 -XX:MinHeapFreeRatio=10 -Djna.library.path=\$APPDIR/lib/vlc -DVLC_PLUGIN_PATH=\$APPDIR/lib/vlc/plugins" \
+            --linux-package-deps "libgtk-3-0,libglib2.0-0,libasound2,libpng16-16,libjpeg62-turbo,libpcre2-8-0,libx11-6,libxext6,libxrender1,libxtst6,libxi6,vlc" \
+            --java-options "-Xmx512m -Xms256m -XX:+UseG1GC -XX:MaxHeapFreeRatio=30 -XX:MinHeapFreeRatio=10" \
             --verbose
 
       # ✅ NEW: Fix scripts in DEB (Critical)

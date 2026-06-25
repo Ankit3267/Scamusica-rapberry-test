@@ -4,8 +4,7 @@ import com.musicplayer.scamusica.model.Ad;
 import com.musicplayer.scamusica.util.AppLogger;
 import com.musicplayer.scamusica.util.Utility;
 import javafx.application.Platform;
-import uk.co.caprica.vlcj.player.base.MediaPlayer;
-import uk.co.caprica.vlcj.player.base.MediaPlayerEventAdapter;
+import com.musicplayer.scamusica.service.CvlcAudioPlayer;
 
 import java.io.File;
 import java.util.*;
@@ -25,7 +24,7 @@ public class AdPlayer {
         void onPlaybackError(Exception ex);
     }
 
-    private final MediaPlayer vlcPlayer;
+    private final CvlcAudioPlayer audioPlayer;
     private final AdPlaybackListener listener;
 //    private final ExecutorService executor = Executors.newSingleThreadExecutor();
 
@@ -41,8 +40,8 @@ public class AdPlayer {
     private volatile String savedSongPath = null;
     private volatile long savedSongTime = 0L;
 
-    public AdPlayer(MediaPlayer vlcPlayer, AdPlaybackListener listener) {
-        this.vlcPlayer = vlcPlayer;
+    public AdPlayer(CvlcAudioPlayer audioPlayer, AdPlaybackListener listener) {
+        this.audioPlayer = audioPlayer;
         this.listener = listener;
     }
 
@@ -114,10 +113,10 @@ public class AdPlayer {
             CountDownLatch stateLatch = new CountDownLatch(1);
             Platform.runLater(() -> {
                 try {
-                    timeRef[0] = vlcPlayer.status().time();
+                    timeRef[0] = audioPlayer.getTime();
                 } catch (Exception ignored) {}
                 try {
-                    volRef[0] = vlcPlayer.audio().volume();
+                    volRef[0] = audioPlayer.getVolume();
                 } catch (Exception ignored) {}
                 stateLatch.countDown();
             });
@@ -135,14 +134,14 @@ public class AdPlayer {
                     int currentVol = (int) (originalVol * (1.0 - (double) i / steps));
                     Platform.runLater(() -> {
                         try {
-                            vlcPlayer.audio().setVolume(currentVol);
+                            audioPlayer.setVolume(currentVol);
                         } catch (Exception ignored) {}
                     });
                     Thread.sleep(100);
                 }
                 Platform.runLater(() -> {
                     try {
-                        vlcPlayer.audio().setVolume(0);
+                        audioPlayer.setVolume(0);
                     } catch (Exception ignored) {}
                 });
             } catch (Exception e) {
@@ -151,11 +150,11 @@ public class AdPlayer {
             // Step 2: Stop current song
             Platform.runLater(() -> {
                 try {
-                    savedSongTime = vlcPlayer.status().time();
+                    savedSongTime = audioPlayer.getTime();
                     AppLogger.log("[AdPlayer] Saving song position: " + savedSongTime);
-                    vlcPlayer.controls().pause();
+                    audioPlayer.pause();
                     listener.onSongPaused("Ad starting");
-                    vlcPlayer.audio().setVolume(originalVol);
+                    audioPlayer.setVolume(originalVol);
                 } catch (Exception ignored) {
                 }
             });
@@ -174,56 +173,17 @@ public class AdPlayer {
 
                 AppLogger.log("[AdPlayer] Playing ad from URL: " + adUrl);
 
-                CountDownLatch latch = new CountDownLatch(1);
-                final MediaPlayerEventAdapter[] adListener = new MediaPlayerEventAdapter[1];
-
                 Platform.runLater(() -> {
-                    try {
-                        listener.onAdPlaybackStarted(ad);
-                        
-                        adListener[0] = new MediaPlayerEventAdapter() {
-                            @Override
-                            public void finished(MediaPlayer mediaPlayer) {
-                                AppLogger.log("[AdPlayer] Ad audio finished");
-                                latch.countDown();
-                            }
-
-                            @Override
-                            public void error(MediaPlayer mediaPlayer) {
-                                AppLogger.log("[AdPlayer] Ad audio error");
-                                latch.countDown();
-                            }
-                        };
-                        vlcPlayer.events().addMediaPlayerEventListener(adListener[0]);
-
-                        AppLogger.log("[AdPlayer] STARTING ACTUAL VLC PLAY");
-                        boolean result = vlcPlayer.media().play(adUrl);
-                        AppLogger.log("[AdPlayer] VLC PLAY RESULT = " + result);
-
-                    } catch (Exception e) {
-                        AppLogger.log("[AdPlayer] Failed to start ad audio: " + e.getMessage());
-                        latch.countDown();
-                    }
+                    listener.onAdPlaybackStarted(ad);
                 });
 
-                boolean finished = latch.await(10, TimeUnit.MINUTES);
-                AppLogger.log("[AdPlayer] Ad latch released, finished=" + finished);
-
-                CountDownLatch cleanupLatch = new CountDownLatch(1);
-                Platform.runLater(() -> {
-                    if (adListener[0] != null) {
-                        try {
-                            vlcPlayer.events().removeMediaPlayerEventListener(adListener[0]);
-                            AppLogger.log("[AdPlayer] Ad event listener removed safely");
-                        } catch (Exception ignored) {
-                        }
-                    }
-                    cleanupLatch.countDown();
-                });
-                
                 try {
-                    cleanupLatch.await(5, TimeUnit.SECONDS);
-                } catch (InterruptedException ignored) {}
+                    AppLogger.log("[AdPlayer] STARTING ACTUAL VLC PLAY");
+                    audioPlayer.playAndWait(adUrl);
+                    AppLogger.log("[AdPlayer] VLC PLAY FINISHED");
+                } catch (Exception e) {
+                    AppLogger.log("[AdPlayer] Failed to start ad audio: " + e.getMessage());
+                }
 
                 Thread.sleep(300); // Minor delay between consecutive audios
             }

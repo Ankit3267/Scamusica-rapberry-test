@@ -22,9 +22,7 @@ import javafx.scene.layout.*;
 import javafx.stage.Stage;
 import org.kordamp.ikonli.javafx.FontIcon;
 
-import uk.co.caprica.vlcj.player.base.MediaPlayer;
-import uk.co.caprica.vlcj.player.base.MediaPlayerEventAdapter;
-import uk.co.caprica.vlcj.player.component.AudioPlayerComponent;
+import com.musicplayer.scamusica.service.CvlcAudioPlayer;
 
 import javax.crypto.CipherInputStream;
 import java.io.File;
@@ -52,12 +50,11 @@ public class PlayerController extends Application {
     private HBox globalControlsWrapper;
     private HBox globalBottomBar;
 
-    private MediaPlayer vlcPlayer;
-    private AudioPlayerComponent vlcPlayerComponent;
+    private CvlcAudioPlayer audioPlayer;
     private boolean vlcHandlersAttached = false;
     private boolean userPaused = false;
 
-    private MediaPlayerEventAdapter currentVlcListener = null;
+    private CvlcAudioPlayer.EventListener currentVlcListener = null;
     private File currentTempFile = null;
     private Thread queueWorkerThread = null;
 
@@ -152,14 +149,7 @@ public class PlayerController extends Application {
         // Start memory watchdog
         MemoryWatchdog.getInstance().start();
 
-        String appDir = System.getProperty("user.dir");
-
-        String vlcPath = appDir + File.separator + "vlc";
-
-        System.setProperty("jna.library.path", vlcPath);
-
-        vlcPlayerComponent = new AudioPlayerComponent();
-        vlcPlayer = vlcPlayerComponent.mediaPlayer();
+        audioPlayer = new CvlcAudioPlayer();
 
         initializeAdSystem();
 
@@ -169,9 +159,9 @@ public class PlayerController extends Application {
         VBox sidebarTop = sidebarUtil.createSidebarTop(headphonesButton);
         FontIcon settingsIcon = sidebarUtil.createSettingsIcon(primaryStage, () -> {
             running = false;
-            if (vlcPlayer != null) {
+            if (audioPlayer != null) {
                 try {
-                    vlcPlayer.controls().stop();
+                    audioPlayer.stop();
                 } catch (Exception ignored) {
                 }
             }
@@ -244,9 +234,9 @@ public class PlayerController extends Application {
                 } else {
                     prefs.remove(PREF_RESUME_TRACK_ID);
                 }
-                if (vlcPlayer != null) {
+                if (audioPlayer != null) {
                     long time = 0;
-                    try { time = vlcPlayer.status().time(); } catch (Exception e) {}
+                    try { time = audioPlayer.getTime(); } catch (Exception e) {}
                     if (adPlayer != null && adPlayer.isPlayingAd()) {
                         time = adPlayer.getSavedSongTime();
                     }
@@ -430,9 +420,9 @@ public class PlayerController extends Application {
                 schedular.shutdownNow();
             }
 
-            if (vlcPlayer != null) {
+            if (audioPlayer != null) {
                 try {
-                    vlcPlayer.controls().stop();
+                    audioPlayer.stop();
                 } catch (Exception ignored) {
                 }
             }
@@ -468,16 +458,16 @@ public class PlayerController extends Application {
 
             double savedVolume = prefs.getDouble(PREF_VOLUME, 85.0);
             volumeSlider.setValue(savedVolume);
-            vlcPlayer.audio().setVolume((int) savedVolume);
+            audioPlayer.setVolume((int) savedVolume);
 
             volumeSlider.valueProperty().addListener((obs, oldVal, newVal) -> {
                 prefs.putDouble(PREF_VOLUME, newVal.doubleValue());
-                vlcPlayer.audio().setVolume(newVal.intValue());
+                audioPlayer.setVolume(newVal.intValue());
             });
 
             progressSlider.setOnMouseReleased(e -> {
                 float pos = (float) (progressSlider.getValue() / 100.0);
-                vlcPlayer.controls().setPosition(pos);
+                audioPlayer.seek((float) pos);
             });
 
             currentPlaylistName = playlistCurrent[0];
@@ -716,7 +706,7 @@ public class PlayerController extends Application {
         AppLogger.log("[PlayerController] Initializing Ad System");
 
         // 1. Create AdPlayer with listeners
-        adPlayer = new AdPlayer(vlcPlayer, new AdPlayer.AdPlaybackListener() {
+        adPlayer = new AdPlayer(audioPlayer, new AdPlayer.AdPlaybackListener() {
             @Override
             public void onAdPlaybackStarted(Ad ad) {
 
@@ -826,13 +816,13 @@ public class PlayerController extends Application {
                                             long savedTime = adPlayer.getSavedSongTime();
                                             String startTimeOpt = ":start-time=" + (savedTime / 1000.0f);
 
-                                            vlcPlayer.audio().setVolume(0);
+                                            audioPlayer.setVolume(0);
                                             asyncExecutor.submit(() -> {
                                                 try {
                                                     for (int i = 0; i < 50; i++) {
                                                         Platform.runLater(() -> {
                                                             try {
-                                                                vlcPlayer.audio().setVolume(0);
+                                                                audioPlayer.setVolume(0);
                                                             } catch (Exception ex) {}
                                                         });
                                                         Thread.sleep(30);
@@ -841,15 +831,15 @@ public class PlayerController extends Application {
                                                 }
                                             });
 
-                                            vlcPlayer.media().play(tempFile.getAbsolutePath(), startTimeOpt);
-                                            vlcPlayer.audio().setVolume(0);
+                                            audioPlayer.play(tempFile.getAbsolutePath(), savedTime);
+                                            audioPlayer.setVolume(0);
 
                                             schedular.schedule(() -> {
                                                 asyncExecutor.submit(() -> {
                                                     try {
                                                         Platform.runLater(() -> {
                                                             try {
-                                                                vlcPlayer.audio().setVolume(0);
+                                                                audioPlayer.setVolume(0);
                                                             } catch (Exception ex) {}
                                                         });
                                                         int steps = 20;
@@ -857,14 +847,14 @@ public class PlayerController extends Application {
                                                             int currentVol = (int) (originalVol * ((double) i / steps));
                                                             Platform.runLater(() -> {
                                                                 try {
-                                                                    vlcPlayer.audio().setVolume(currentVol);
+                                                                    audioPlayer.setVolume(currentVol);
                                                                 } catch (Exception ex) {}
                                                             });
                                                             Thread.sleep(100);
                                                         }
                                                         Platform.runLater(() -> {
                                                             try {
-                                                                vlcPlayer.audio().setVolume(originalVol);
+                                                                audioPlayer.setVolume(originalVol);
                                                             } catch (Exception ex) {}
                                                         });
                                                     } catch (Exception e) {
@@ -882,13 +872,13 @@ public class PlayerController extends Application {
                                 long savedTime = adPlayer.getSavedSongTime();
                                 String startTimeOpt = ":start-time=" + (savedTime / 1000.0f);
 
-                                vlcPlayer.audio().setVolume(0);
+                                audioPlayer.setVolume(0);
                                 asyncExecutor.submit(() -> {
                                     try {
                                         for (int i = 0; i < 50; i++) {
                                             Platform.runLater(() -> {
                                                 try {
-                                                    vlcPlayer.audio().setVolume(0);
+                                                    audioPlayer.setVolume(0);
                                                 } catch (Exception ex) {}
                                             });
                                             Thread.sleep(30);
@@ -897,15 +887,15 @@ public class PlayerController extends Application {
                                     }
                                 });
 
-                                vlcPlayer.media().play(encodeMediaUrl(track.getUrl()), startTimeOpt);
-                                vlcPlayer.audio().setVolume(0);
+                                audioPlayer.play(encodeMediaUrl(track.getUrl()), savedTime);
+                                audioPlayer.setVolume(0);
 
                                 schedular.schedule(() -> {
                                     asyncExecutor.submit(() -> {
                                         try {
                                             Platform.runLater(() -> {
                                                 try {
-                                                    vlcPlayer.audio().setVolume(0);
+                                                    audioPlayer.setVolume(0);
                                                 } catch (Exception ex) {}
                                             });
                                             int steps = 20;
@@ -913,14 +903,14 @@ public class PlayerController extends Application {
                                                 int currentVol = (int) (originalVol * ((double) i / steps));
                                                 Platform.runLater(() -> {
                                                     try {
-                                                        vlcPlayer.audio().setVolume(currentVol);
+                                                        audioPlayer.setVolume(currentVol);
                                                     } catch (Exception ex) {}
                                                 });
                                                 Thread.sleep(100);
                                             }
                                             Platform.runLater(() -> {
                                                 try {
-                                                    vlcPlayer.audio().setVolume(originalVol);
+                                                    audioPlayer.setVolume(originalVol);
                                                 } catch (Exception ex) {}
                                             });
                                         } catch (Exception e) {
@@ -1309,7 +1299,7 @@ public class PlayerController extends Application {
                             // updatePlayButtonState(controlsWrapper);
                             // AppLogger.log("[AUTO-PLAY] Downloaded count: " + newGenreCount);
                             // if (newGenreCount >= 2) {
-                            // if (!vlcPlayer.status().isPlaying() && !userPaused) {
+                            // if (!audioPlayer.isPlaying() && !userPaused) {
                             // try {
                             // AppLogger.log("[AutoPlay] 2 songs downloaded. Starting playback." +
                             // "..");
@@ -1349,7 +1339,7 @@ public class PlayerController extends Application {
                                     // ✅ FIX: Add isFirstTrackStarted check
                                     if (newGenreCount >= 2
                                             && !isFirstTrackStarted // ← ← ← NEW
-                                            && !vlcPlayer.status().isPlaying()
+                                            && !audioPlayer.isPlaying()
                                             && !userPaused
                                             && (playQueue.isEmpty() || currentTrackIndex == 0)) { // ← ← ← NEW
 
@@ -1573,9 +1563,9 @@ public class PlayerController extends Application {
 
         titleLabel.setText(track.getTitle());
 
-        if (vlcPlayer != null && vlcPlayer.status().isPlaying()) {
+        if (audioPlayer != null && audioPlayer.isPlaying()) {
             try {
-                vlcPlayer.controls().pause();
+                audioPlayer.pause();
             } catch (Exception ignored) {
             }
         }
@@ -1644,9 +1634,9 @@ public class PlayerController extends Application {
                             if (savedTime > 0) {
                                 AppLogger.log("[PLAYER] Resuming from saved time: " + savedTime);
                                 prefs.remove(PREF_RESUME_TIME);
-                                vlcPlayer.media().play(tempFile.getAbsolutePath(), ":start-time=" + (savedTime / 1000.0f));
+                                audioPlayer.play(tempFile.getAbsolutePath(), savedTime);
                             } else {
-                                vlcPlayer.media().play(tempFile.getAbsolutePath());
+                                audioPlayer.play(tempFile.getAbsolutePath());
                             }
 
                             if (!vlcHandlersAttached) {
@@ -1674,7 +1664,7 @@ public class PlayerController extends Application {
                         if (NetworkMonitor.getInstance().isOnline()) {
                             Platform.runLater(() -> {
                                 AppLogger.log("[PLAYER] Falling back to stream: " + fallbackUrl);
-                                vlcPlayer.media().play(fallbackUrl);
+                                audioPlayer.play(fallbackUrl);
                                 if (!vlcHandlersAttached) {
                                     attachVlcHandlers(albumHeading, titleLabel, progressSlider,
                                             leftTime, rightTime, controlsWrapper, bottomBar, downloadLabel, autoPlay);
@@ -1711,9 +1701,9 @@ public class PlayerController extends Application {
         if (savedTime > 0) {
             AppLogger.log("[PLAYER] Resuming from saved time: " + savedTime);
             prefs.remove(PREF_RESUME_TIME);
-            vlcPlayer.media().play(safeUrl, ":start-time=" + (savedTime / 1000.0f));
+            audioPlayer.play(safeUrl, savedTime);
         } else {
-            vlcPlayer.media().play(safeUrl);
+            audioPlayer.play(safeUrl);
         }
 
         if (!vlcHandlersAttached) {
@@ -1748,10 +1738,10 @@ public class PlayerController extends Application {
             return;
         }
 
-        currentVlcListener = new MediaPlayerEventAdapter() {
+        currentVlcListener = new CvlcAudioPlayer.EventListener() {
 
             @Override
-            public void playing(MediaPlayer mediaPlayer) {
+            public void onPlaying() {
                 Platform.runLater(() -> {
                     FontIcon bigIcon = controlsUtil.getBigPlayIcon(controlsWrapper);
                     if (bigIcon != null) {
@@ -1761,7 +1751,7 @@ public class PlayerController extends Application {
             }
 
             @Override
-            public void paused(MediaPlayer mediaPlayer) {
+            public void onPaused() {
                 Platform.runLater(() -> {
                     FontIcon bigIcon = controlsUtil.getBigPlayIcon(controlsWrapper);
                     if (bigIcon != null) {
@@ -1771,7 +1761,7 @@ public class PlayerController extends Application {
             }
 
             @Override
-            public void stopped(MediaPlayer mediaPlayer) {
+            public void onStopped() {
                 Platform.runLater(() -> {
                     FontIcon bigIcon = controlsUtil.getBigPlayIcon(controlsWrapper);
                     if (bigIcon != null) {
@@ -1781,26 +1771,24 @@ public class PlayerController extends Application {
             }
 
             @Override
-            public void timeChanged(MediaPlayer mediaPlayer, long newTime) {
+            public void onTimeChanged(long newTimeMs, long durationMs) {
                 Platform.runLater(() -> {
-
-                    long duration = mediaPlayer.status().length();
-
-                    if (duration > 0) {
-
-                        double progress = (double) newTime / duration;
-
+                    if (durationMs > 0) {
+                        double progress = (double) newTimeMs / durationMs;
                         progressSlider.setValue(progress * 100);
-
-                        leftTime.setText(formatTime(newTime / 1000));
-
-                        rightTime.setText("-" + formatTime((duration - newTime) / 1000));
+                        leftTime.setText(formatTime(newTimeMs / 1000));
+                        rightTime.setText("-" + formatTime((durationMs - newTimeMs) / 1000));
                     }
                 });
             }
 
             @Override
-            public void finished(MediaPlayer mediaPlayer) {
+            public void onError(Exception ex) {
+                AppLogger.log("[PLAYER] Error from VLC: " + ex.getMessage());
+            }
+
+            @Override
+            public void onFinished() {
 
                 if (adPlayer != null && adPlayer.isPlayingAd()) {
                     AppLogger.log("[PLAYER] Media finished but ad is active, ignoring");
@@ -1840,7 +1828,7 @@ public class PlayerController extends Application {
                 });
             }
         };
-        vlcPlayer.events().addMediaPlayerEventListener(currentVlcListener);
+        audioPlayer.setEventListener(currentVlcListener);
     }
 
     private void playNextTrack(Label albumHeading,
@@ -1902,7 +1890,7 @@ public class PlayerController extends Application {
                 return;
             }
 
-            if (vlcPlayer == null || currentTrackIndex >= playQueue.size() || currentTrackIndex < 0) {
+            if (audioPlayer == null || currentTrackIndex >= playQueue.size() || currentTrackIndex < 0) {
                 currentTrackIndex = 0;
                 try {
                     playTrack(
@@ -1921,14 +1909,13 @@ public class PlayerController extends Application {
                 return;
             }
 
-            if (vlcPlayer.status().isPlaying()) {
-                vlcPlayer.controls().pause();
+            if (audioPlayer.isPlaying()) {
+                audioPlayer.pause();
                 userPaused = true;
                 bigIcon.setIconLiteral("fas-play");
                 bigIcon.setIconColor(javafx.scene.paint.Color.WHITE);
             } else {
-                if (vlcPlayer.status().state() == uk.co.caprica.vlcj.player.base.State.STOPPED ||
-                        vlcPlayer.status().state() == uk.co.caprica.vlcj.player.base.State.ENDED) {
+                if (audioPlayer.getState() == CvlcAudioPlayer.State.STOPPED || audioPlayer.getState() == CvlcAudioPlayer.State.ENDED) {
                     try {
                         playTrack(
                                 albumHeading,
@@ -1944,7 +1931,7 @@ public class PlayerController extends Application {
                         ex.printStackTrace();
                     }
                 } else {
-                    vlcPlayer.controls().play();
+                    audioPlayer.resume();
                     userPaused = false;
                     bigIcon.setIconLiteral("fas-pause");
                     bigIcon.setIconColor(javafx.scene.paint.Color.WHITE);
@@ -1976,9 +1963,9 @@ public class PlayerController extends Application {
             }
         }
 
-        if (vlcPlayer != null) {
+        if (audioPlayer != null) {
             try {
-                vlcPlayer.controls().stop();
+                audioPlayer.stop();
             } catch (Exception ignored) {
             }
         }
