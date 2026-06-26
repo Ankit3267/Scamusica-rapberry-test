@@ -36,6 +36,7 @@ public class CvlcAudioPlayer {
     private volatile String currentState = "stopped";
     private volatile String pendingCommand = null;
     private volatile boolean isUserPaused = false;
+    private Thread readerThread;
 
     public CvlcAudioPlayer() {
     }
@@ -70,7 +71,17 @@ public class CvlcAudioPlayer {
         };
 
         play(mediaUrl, 0);
-        latch.await();
+        boolean completed = false;
+        try {
+            completed = latch.await(10, TimeUnit.MINUTES);
+        } catch (InterruptedException e) {
+            AppLogger.log("[CvlcAudioPlayer] playAndWait interrupted");
+            throw e;
+        }
+        if (!completed) {
+            AppLogger.log("[CvlcAudioPlayer] playAndWait timed out after 10 minutes, force stopping");
+            stop();
+        }
         this.listener = tempListener;
     }
 
@@ -100,7 +111,7 @@ public class CvlcAudioPlayer {
                 writer = new BufferedWriter(new OutputStreamWriter(vlcProcess.getOutputStream()));
                 reader = new BufferedReader(new InputStreamReader(vlcProcess.getInputStream()));
 
-                Thread readerThread = new Thread(() -> {
+                readerThread = new Thread(() -> {
                     try {
                         String line;
                         while ((line = reader.readLine()) != null) {
@@ -133,21 +144,25 @@ public class CvlcAudioPlayer {
                 });
 
                 poller.scheduleAtFixedRate(() -> {
-                    if (!isRunning.get()) return;
-                    
-                    // Always query status to detect play/pause state
-                    sendCommand("status");
-                    
-                    if (!"playing".equals(currentState) && !"paused".equals(currentState)) {
-                        pendingCommand = null;
-                        return;
-                    }
-                    
-                    // We only query length until we have it
-                    if (currentDurationMs <= 0) {
-                        sendCommand("get_length");
-                    } else {
-                        sendCommand("get_time");
+                    try {
+                        if (!isRunning.get()) return;
+                        
+                        // Always query status to detect play/pause state
+                        sendCommand("status");
+                        
+                        if (!"playing".equals(currentState) && !"paused".equals(currentState)) {
+                            pendingCommand = null;
+                            return;
+                        }
+                        
+                        // We only query length until we have it
+                        if (currentDurationMs <= 0) {
+                            sendCommand("get_length");
+                        } else {
+                            sendCommand("get_time");
+                        }
+                    } catch (Exception e) {
+                        AppLogger.log("[CvlcAudioPlayer] Poller error: " + e.getMessage());
                     }
                 }, 500, 500, TimeUnit.MILLISECONDS);
 
@@ -239,6 +254,10 @@ public class CvlcAudioPlayer {
 
     public void stop() {
         isRunning.set(false);
+        if (readerThread != null) {
+            readerThread.interrupt();
+            readerThread = null;
+        }
         if (poller != null) {
             poller.shutdownNow();
             poller = null;
@@ -246,7 +265,12 @@ public class CvlcAudioPlayer {
         if (vlcProcess != null) {
             try {
                 sendCommand("quit");
+                try { Thread.sleep(300); } catch (Exception ignored) {}
                 vlcProcess.destroy();
+                if (vlcProcess.isAlive()) {
+                    vlcProcess.destroyForcibly();
+                }
+                try { vlcProcess.waitFor(3, TimeUnit.SECONDS); } catch (Exception ignored) {}
             } catch (Exception ignored) {}
             vlcProcess = null;
         }

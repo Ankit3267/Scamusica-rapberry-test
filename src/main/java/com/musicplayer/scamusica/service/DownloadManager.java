@@ -30,11 +30,7 @@ public class DownloadManager {
         void onCancelled();
     }
 
-    private final ExecutorService executor = Executors.newSingleThreadExecutor(r -> {
-        Thread t = new Thread(r, "DownloadManager");
-        t.setDaemon(true);
-        return t;
-    });
+    private ExecutorService executor;
     private final BlockingQueue<Integer> downloadQueue = new LinkedBlockingQueue<>();
     private volatile boolean cancelled = false;
     private final Set<Integer> activeDownloads = ConcurrentHashMap.newKeySet();
@@ -50,12 +46,20 @@ public class DownloadManager {
 
     public void start() {
         cancelled = false;
+        executor = Executors.newSingleThreadExecutor(r -> {
+            Thread t = new Thread(r, "DownloadManager");
+            t.setDaemon(true);
+            return t;
+        });
         executor.submit(this::runWorker);
     }
 
     public void stop() {
         cancelled = true;
-        executor.shutdownNow();
+        if (executor != null) {
+            executor.shutdownNow();
+            executor = null;
+        }
     }
 
     public void queueDownload(int songId) {
